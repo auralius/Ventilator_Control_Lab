@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#111c2e">
+  <meta name="description" content="Barefoot Mechanical Ventilator Control Lab: browser-based educational lung mechanics simulation with student-written JavaScript controllers.">
+  <title>Ventilator Control Lab · Barefoot Control Series</title>
+  <link rel="stylesheet" href="./styles.css?v=1.0.0">
+  <script src="./app.js?v=1.0.0" defer></script>
+</head>
+<body>
+  <div class="shell">
+    <header class="topbar">
+      <div class="brand"><div class="brand-mark" aria-hidden="true">◉</div><div><strong>BREATH<span>LAB</span></strong><small>BAREFOOT CONTROL SERIES</small></div></div>
+      <div class="topright"><span class="topchip">SINGLE-COMPARTMENT · v1.0</span><span class="status"><i id="statusDot"></i><span id="statusText">Initializing</span></span></div>
+    </header>
+    <section class="hero">
+      <div><p class="eyebrow">CONTROL SYSTEMS · BIOMEDICAL ENGINEERING</p><h1>Shape the breath.<br><em>Control the response.</em></h1><p class="hero-sub">Design a JavaScript controller to follow a repeating lung-volume setpoint. Explore airway resistance, lung compliance, and pressure limits—all in your browser.</p></div>
+      <div class="equation-card"><span>SIMPLIFIED LUNG MECHANICS</span><strong>P<sub>aw</sub> − PEEP = R · V̇ + V / C</strong><small>Airway pressure → airflow → lung volume</small><div class="eq-secondary">G(s) = C / (RCs + 1)</div></div>
+    </section>
+    <section class="stats" aria-label="Live vital process values">
+      <div class="stat"><span>ACTUAL VOLUME</span><div><strong id="statVolume">0</strong><b>mL</b></div><small>Volume above end-expiratory baseline</small></div>
+      <div class="stat"><span>REFERENCE VOLUME</span><div><strong id="statTarget">0</strong><b>mL</b></div><small>Periodic desired lung inflation</small></div>
+      <div class="stat"><span>AIRWAY PRESSURE</span><div><strong id="statPressure">5.0</strong><b>cmH₂O</b></div><small>Controller output, saturated</small></div>
+      <div class="stat"><span>AIRFLOW</span><div><strong id="statFlow">+0.00</strong><b>L/s</b></div><small>Positive = inspiration</small></div>
+    </section>
+    <main>
+      <div class="workspace-grid">
+        <section class="panel plant-panel">
+          <div class="panel-top"><div><div class="section-tag">01 / THE PLANT</div><h2>Breathing workspace</h2></div><span class="pill" id="phasePill">READY</span></div>
+          <div class="plant-stage">
+            <div class="stage-left">
+              <div class="lung-illustration">
+                <svg viewBox="0 0 360 260" role="img" aria-label="Animated schematic of lungs connected to pressure source">
+                  <defs><linearGradient id="lungG" x1="0" x2="1" y1="0" y2="1"><stop stop-color="#ffbac1"/><stop offset="1" stop-color="#e17a93"/></linearGradient></defs>
+                  <rect x="8" y="111" width="76" height="53" rx="10" fill="#e2f4f4" stroke="#48ada8" stroke-width="1.5"/>
+                  <text x="46" y="133" class="svg-label" text-anchor="middle">PRESSURE</text><text x="46" y="148" class="svg-caption" text-anchor="middle">SOURCE</text>
+                  <path id="airwayPipe" d="M84 137 H112 V52 H181 V85" fill="none" stroke="#62b1cb" stroke-width="8" stroke-linecap="round" stroke-linejoin="round"/>
+                  <path d="M181 85 V114 M181 114 L163 127 M181 114 L200 127" fill="none" stroke="#6e9fb9" stroke-width="10" stroke-linecap="round"/>
+                  <g id="lungLeft"><path d="M160 106 C131 87 113 111 112 153 C111 191 132 219 158 213 C166 209 169 185 169 157 L167 115Z" fill="url(#lungG)" stroke="#dc8097" stroke-width="2"/></g>
+                  <g id="lungRight"><path d="M202 106 C231 87 249 111 250 153 C251 191 230 219 204 213 C196 209 193 185 193 157 L195 115Z" fill="url(#lungG)" stroke="#dc8097" stroke-width="2"/></g>
+                  <path id="diaphragm" d="M119 231 Q181 246 244 231" fill="none" stroke="#7b83b1" stroke-width="3" stroke-linecap="round" stroke-dasharray="5 5"/>
+                  <circle cx="111" cy="52" r="4.5" fill="#59bfbd"/><circle cx="181" cy="52" r="4.5" fill="#59bfbd"/>
+                  <path d="M225 58 H270" stroke="#d6e1eb" stroke-width="1.5" stroke-dasharray="3 3"/><text x="272" y="55" class="svg-label">PRESSURE</text><text x="272" y="69" class="svg-caption">Paw</text>
+                  <path d="M247 164 H271" stroke="#d6e1eb" stroke-width="1.5" stroke-dasharray="3 3"/><text x="275" y="160" class="svg-label">VOLUME</text><text x="275" y="175" class="svg-caption">V(t)</text>
+                </svg>
+              </div>
+              <div class="stage-indicators"><div><span>CURRENT PHASE</span><strong id="phaseText">Ready</strong></div><div><span>BREATH</span><strong id="breathCount">0 / 8</strong></div><div><span>TIME</span><strong id="stageTime">0.00 s</strong></div></div>
+            </div>
+            <div class="stage-right">
+              <div class="stage-readout"><span>ACTUAL LUNG VOLUME</span><strong><span id="stageVolume">0</span> <small>mL</small></strong><div class="capacity-bar"><div id="fillVolume"></div><div id="targetTick" title="Current reference"></div></div><small>Reference: <b id="stageTarget">0</b> mL</small></div>
+              <div class="mechanic-grid"><div><span>COMPLIANCE · C</span><strong id="readCompliance">0.050</strong><small>L/cmH₂O</small></div><div><span>RESISTANCE · R</span><strong id="readResistance">10.0</strong><small>cmH₂O·s/L</small></div><div><span>TIME CONSTANT</span><strong id="readTau">0.50</strong><small>seconds (RC)</small></div><div><span>PRESSURE LIMIT</span><strong id="readLimit">25.0</strong><small>cmH₂O</small></div></div>
+              <div class="warning" id="pressureNote">The pressure is held constant between controller samples.</div>
+            </div>
+          </div>
+          <div class="transport"><button class="button primary" id="runBtn">▶ Run</button><button class="button secondary" id="pauseBtn">Ⅱ Pause</button><button class="button secondary" id="stepBtn">↷ Step</button><button class="button secondary" id="finishBtn">⏭ End</button><button class="button secondary" id="resetBtn">↺ Reset</button><label class="speed">SPEED <select id="speedSelect" aria-label="Playback speed"><option value="1">1×</option><option value="2">2×</option><option value="4" selected>4×</option><option value="8">8×</option><option value="16">16×</option></select></label></div>
+          <div class="timeline"><span id="timelineLabel">0.0 / 32.0 s</span><div class="track"><div id="timelineFill"></div></div><span class="tip">Speed affects playback, not T<sub>s</sub>.</span></div>
+        </section>
+        <section class="panel editor-panel">
+          <div class="panel-top"><div><div class="section-tag">02 / YOUR ALGORITHM</div><h2>JavaScript controller</h2></div><span class="pill cyan">INIT() + CONTROLLER()</span></div>
+          <div class="code-toolbar"><label>EXAMPLE <select id="exampleSelect"><option value="pi_ff">PI + model feedforward</option><option value="starter">Student starter (PEEP only)</option><option value="p">Proportional (P)</option><option value="pi">PI controller</option><option value="ff">Model feedforward</option></select></label><button class="text-button" id="restoreBtn">Load example</button></div>
+          <div class="code-wrapper"><div id="lineNumbers" class="line-numbers" aria-hidden="true"></div><textarea id="codeEditor" spellcheck="false" autocorrect="off" autocapitalize="off" autocomplete="off" aria-label="Student JavaScript source code"></textarea></div>
+          <div class="editor-buttons"><button class="button primary" id="applyBtn">↻ Apply &amp; reset</button><button class="button secondary" id="downloadCodeBtn">↓ Save .js</button></div>
+          <div class="code-message" id="message" role="status">Choose a controller and press Run.</div>
+          <details class="api-details" open><summary>Student API reference</summary><div class="api-body"><p><code>init()</code> runs once per experiment. <code>controller()</code> runs once every <code>params.dt</code> and returns <strong>absolute airway pressure</strong> in cmH₂O (or <code>{pressure: …}</code>). The simulator enforces <code>PEEP ≤ pressure ≤ maxPressure</code>.</p><p><strong>Read-only <code>state</code>:</strong> <code>volume</code> (L), <code>flow</code> (L/s), <code>pressure</code> (cmH₂O), <code>target.volume</code> (L), <code>target.flow</code> (L/s), <code>error</code> (L), <code>time</code> (s), <code>phase</code> (inspiration/expiration), <code>breath</code>.</p><p><strong>Read-only <code>params</code>:</strong> <code>dt</code>, <code>compliance</code>, <code>resistance</code>, <code>peep</code>, <code>maxPressure</code>, <code>tidalVolume</code>, <code>breathsPerMin</code>, <code>inspirationFraction</code>.</p><p><strong>Writable <code>memory</code>:</strong> begins as <code>{}</code> for each experiment. Store integrators and histories here; do not change the simulated plant state.</p></div></details>
+        </section>
+      <section class="panel experiments-panel"><div class="panel-top"><div><div class="section-tag">03 / DESIGN YOUR EXPERIMENT</div><h2>Breathing pattern &amp; plant conditions</h2></div><span class="pill">VOLUME REFERENCE TRACKING</span></div>
+        <div class="experiment-grid">
+          <label>EXPERIMENT <select id="scenarioSelect"><option value="baseline">01 · Healthy baseline</option><option value="stiff">02 · Compliance drops at 12 s</option><option value="resistant">03 · Resistance rises at 12 s</option><option value="limited">04 · Pressure ceiling challenge</option></select></label>
+          <label>TIDAL VOLUME <div class="inline-control"><input type="range" id="tidalInput" min="0.30" max="0.70" step="0.05" value="0.50"><output id="tidalOutput">500 mL</output></div></label>
+          <label>BREATHS / MIN <div class="inline-control"><input type="range" id="bpmInput" min="10" max="20" step="1" value="15"><output id="bpmOutput">15 /min</output></div></label>
+          <label>SAMPLE TIME <select id="dtSelect"><option value="0.01">10 ms</option><option value="0.02" selected>20 ms</option><option value="0.05">50 ms</option><option value="0.10">100 ms</option></select></label>
+          <label>INSPIRATION FRACTION <div class="inline-control"><input type="range" id="inspInput" min="0.25" max="0.50" step="0.05" value="0.35"><output id="inspOutput">35%</output></div></label>
+          <label>MAXIMUM PRESSURE <select id="maxPressureSelect"><option value="20">20 cmH₂O</option><option value="25" selected>25 cmH₂O</option><option value="30">30 cmH₂O</option></select></label>
+        </div><p class="experiment-note" id="scenarioNote">Baseline: C = 0.050 L/cmH₂O, R = 10 cmH₂O·s/L, PEEP = 5 cmH₂O. Experiment length: 32 seconds.</p>
+      </section>
+      </div>
+      <section class="panel charts-panel"><div class="panel-top"><div><div class="section-tag">04 / MEASURE THE RESPONSE</div><h2>Control performance</h2></div><div class="buttons-inline"><button class="button secondary" id="exportBtn">↓ Export CSV</button><button class="button secondary" id="exportPlotBtn">↓ Save plots</button></div></div>
+        <div class="plot-stack">
+          <div class="plot-container"><div class="plot-caption"><strong>Lung volume</strong><div><span class="legend"><i class="legend-blue"></i> Actual</span><span class="legend"><i class="legend-orange"></i> Reference</span></div></div><canvas id="volumeChart" aria-label="Plot of actual and target lung volume over time"></canvas></div>
+          <div class="plot-container"><div class="plot-caption"><strong>Airway pressure</strong><div><span class="legend"><i class="legend-purple"></i> Paw</span><span class="legend"><i class="legend-gray"></i> PEEP</span><span class="legend"><i class="legend-red"></i> Limit</span></div></div><canvas id="pressureChart" aria-label="Airway pressure over time"></canvas></div>
+          <div class="plot-container"><div class="plot-caption"><strong>Airflow</strong><div><span class="legend"><i class="legend-teal"></i> Flow (+ inspiration / − expiration)</span></div></div><canvas id="flowChart" aria-label="Airflow over time"></canvas></div>
+        </div><div class="result-footer"><div><span>VOLUME RMSE</span><strong id="rmseRead">—</strong></div><div><span>PRESSURE SATURATION</span><strong id="satRead">—</strong></div><div><span>STUDENT CALLBACKS</span><strong id="callsRead">—</strong></div><div><span>MODEL</span><strong>Exact ZOH · 1 compartment</strong></div></div>
+      </section>
+      <section class="notes-grid"><div class="note-card"><span>THE PLANT</span><h3>One compliance. One resistance.</h3><p>Airway pressure is the manipulated input; lung volume above the PEEP baseline is the controlled output. Compliance stores the volume; resistance determines the flow needed to change it.</p></div><div class="note-card"><span>THE CHALLENGE</span><h3>Not every reference is reachable.</h3><p>Expiration is passive in this model. Pressure cannot fall below PEEP. A low ceiling or high airway resistance can prevent accurate volume tracking—even with a well-written controller.</p></div><div class="note-card caution"><span>EDUCATIONAL MODEL ONLY</span><h3>Not a medical device.</h3><p>No oxygen exchange, patient effort, alarms, valves, leaks, nonlinear physiology, or clinical safety systems are modeled. Never use this lab to control a real ventilator or make treatment decisions.</p></div></section>
+    </main>
+    <footer><span>BAREFOOT CONTROL SERIES · MECHANICAL VENTILATOR LAB v1.0</span><span>If you can derive it, you can code it. If you can code it, you can test it.</span></footer>
+  </div>
+</body>
+</html>
