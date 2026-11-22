@@ -2,6 +2,8 @@
 
 **Virtual Lab Control Series · Educational biomedical process-control simulator · GitHub Pages-ready**
 
+__URL : https://auralius.github.io/Ventilator_Control_Lab/__
+
 A lightweight browser-based virtual lab in which students write a JavaScript controller to regulate **lung volume** by commanding **airway pressure**. The reference follows a repeating inspiration/expiration cycle. The lab is built with native HTML, CSS, JavaScript, Canvas, SVG, and a Web Worker; no Python, Node.js, external CDNs, or JavaScript frameworks are required.
 
 > **Educational demonstration only.** This is not a clinical ventilator model or a medical-device controller. It must never be connected to a patient or used to inform treatment. It omits oxygen exchange, patient effort, sensors, safety alarms, valve dynamics, nonlinear lung mechanics, and many other essential physiological and engineering effects.
@@ -56,12 +58,12 @@ $$
 
 Let `T=60/bpm`, `Ti=T*inspirationFraction`, `Te=T−Ti`, and `a=t modulo T`. A smooth repeating desired volume is:
 
-$$
-V_{ref}(a)=\begin{cases}
-\frac{V_T}{2}\bigl(1-\cos(\pi a/T_i)\bigr), &0\le a<T_i,\$$3pt]
-\frac{V_T}{2}\bigl(1+\cos(\pi(a-T_i)/T_e)\bigr), &T_i\le a<T.
+```math
+V_{ref}(a) = \begin{cases}
+\dfrac{V_T}{2}\bigl(1 - \cos(\pi a / T_i)\bigr), & 0 \le a < T_i, \\
+\dfrac{V_T}{2}\bigl(1 + \cos(\pi(a - T_i) / T_e)\bigr), & T_i \le a < T.
 \end{cases}
-$$
+```
 
 The exact derivative is provided to students as `state.target.flow`. The resulting reference is a **pedagogical waveform**, not a specified clinical ventilation mode. The simulator does not guarantee it is reachable, especially during passive exhalation.
 
