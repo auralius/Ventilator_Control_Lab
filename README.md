@@ -1,12 +1,20 @@
-# Mechanical Ventilator Control Lab v1.0
+# Mechanical Ventilator Control Lab v1.1
 
-**Virtual Lab Control Series · Educational biomedical process-control simulator · GitHub Pages-ready**
+__URL: https://auralius.github.io/Ventilator_Control_Lab/__
 
-__URL : https://auralius.github.io/Ventilator_Control_Lab/__
+---
 
 A lightweight browser-based virtual lab in which students write a JavaScript controller to regulate **lung volume** by commanding **airway pressure**. The reference follows a repeating inspiration/expiration cycle. The lab is built with native HTML, CSS, JavaScript, Canvas, SVG, and a Web Worker; no Python, Node.js, external CDNs, or JavaScript frameworks are required.
 
 > **Educational demonstration only.** This is not a clinical ventilator model or a medical-device controller. It must never be connected to a patient or used to inform treatment. It omits oxygen exchange, patient effort, sensors, safety alarms, valve dynamics, nonlinear lung mechanics, and many other essential physiological and engineering effects.
+
+## What's new in v1.1
+
+- The pressure chart separates **controller demand (amber dashed)** and **applied pressure (purple)**; the CSV additionally records the controller's returned pressure.
+- Built-in PI and PI + feedforward examples return `{pressure, rawPressure}` so anti-windup can work while the diagnostic chart still sees the unclipped demand.
+- **Upper-ceiling activity** is measured from the applied pressure, even if older student code returns an already-clipped number. **Clipped raw demand** is tracked separately.
+- The educational low-volume warning activates only after **two consecutive completed breaths** with both a substantial inspired-volume shortfall and sustained upper-ceiling activity; the exact definitions are provided below.
+- Same exact-ZOH plant, student callbacks, operating scenarios, and GitHub Pages deployment as v1.0.
 
 ## Run locally
 
@@ -71,9 +79,9 @@ The exact derivative is provided to students as `state.target.flow`. The resulti
 
 `controller()` runs once per `Ts`. The commanded pressure is clipped to the range `PEEP … maxPressure` and **held constant** for that interval. With `alpha = exp(-Ts/(RC))` and `Veq=C*(Paw−PEEP)`, the simulator updates:
 
-$$
+\[
 V[k+1]=V_{eq}[k]+\bigl(V[k]-V_{eq}[k]\bigr)\alpha.
-$$
+\]
 
 This is **exact for a fixed C, R, and pressure within one sample**; the simulator updates C and R at experiment transitions. The displayed and exported airflow uses the **sample-mean** `(V[k+1]−V[k])/Ts`, not instantaneous flow at the sample boundary. The simulated controller, reference, and plant are all evaluated at deterministic simulation times, independent of visualization playback speed.
 
@@ -90,7 +98,24 @@ Functions:
 - `init()` (optional): run once per new experiment, **before** the first sample.
 - `controller()` (required): run once per sampling period; return a **numeric absolute airway pressure** (cmH₂O), or an object `{ pressure: value }`.
 
-The worker enforces `PEEP ≤ P_aw ≤ maxPressure`. The controller cannot actively generate below-PEEP pressure for expiration; passive lung elastic recoil drives expiration in this model.
+The worker enforces `PEEP ≤ P_aw ≤ maxPressure`. In **v1.1**, students can also expose the unclipped controller demand even when they clamp inside `controller()` for anti-windup:
+
+```javascript
+function init() { memory.integral = 0; }
+function controller() {
+  const e = state.target.volume - state.volume;
+  const raw = params.peep + 35*e + 20*memory.integral;
+  const pressure = Math.max(params.peep, Math.min(params.maxPressure, raw));
+  if (raw === pressure || (raw > pressure && e < 0) || (raw < pressure && e > 0)) {
+    memory.integral += e*params.dt;
+  }
+  return {pressure, rawPressure:raw};
+}
+```
+
+**Compatibility:** `return number;` and `return {pressure:number};` still work. The engine cannot reconstruct a controller's hidden raw demand from an already-clipped number. In that case the chart plots the *reported request*, and the separate upper-ceiling metric still recognizes that applied pressure is at its ceiling. Returned absolute pressure is **not pump PWM**. The simulator still models an ideal pressure actuator, without pump dynamics.
+
+ The controller cannot actively generate below-PEEP pressure for expiration; passive lung elastic recoil drives expiration in this model.
 
 Example:
 
@@ -119,14 +144,16 @@ This simple PI example lacks anti-windup; the built-in PI example includes condi
 3. **Increased resistance:** at `t=12 s`, `R` increases to `22 cmH₂O·s/L`.
 4. **Pressure-limited challenge:** the maximum allowed airway pressure is `12 cmH₂O` despite the selector. At baseline compliance, steady-state inflation cannot exceed `C(12−5)=0.35 L`.
 
-The pressure and volume reference are plotted against time, as is the signed airflow. Controller output constraints and both mechanics parameters appear in the live plant view and CSV.
+The pressure and volume reference are plotted against time, as is the signed airflow. **The pressure chart now shows two separate curves:** dashed amber for controller demand and purple for applied (clipped) airway pressure. The chart includes PEEP and the ceiling. The live dashboard and CSV also distinguish these signals.
 
 ## Data exports and verification
 
-- **Export CSV:** all samples, target volume and flow, actual volume and mean flow, applied airway pressure, instantaneous parameters, output error, and saturation flag.
+- **Export CSV:** all samples, reference and actual volume/flow, controller-returned pressure, declared raw demand (when available), applied airway pressure, mechanics, pressure-ceiling flag, clipped-demand flag, and educational warning state.
 - **Save plots:** PNG with volume, pressure, and flow plots as currently shown.
 - **Volume RMSE:** RMS sampled volume tracking error over the full run, excluding initial sample, in mL.
-- **Pressure saturation:** fraction of samples where the requested pressure was clipped at either the PEEP floor or the maximum-pressure ceiling.
+- **Upper ceiling active:** fraction of *all controller samples* with **applied pressure at the upper ceiling**, regardless of whether student code pre-clipped its result. The normal PEEP floor during expiration is not counted.
+- **Raw demand clipped:** fraction of controller samples with an unclipped raw request outside the enforced range; this is fully accurate only when controller code returns the raw request (either directly or as `rawPressure`).
+- **Low volume + ceiling:** completed breaths meeting both conditions: less than **90%** of the selected target tidal volume estimated via positive inspiratory-flow integral, and the applied pressure held at the upper ceiling for at least **10% of inspiratory controller samples**. These are arbitrary **teaching thresholds**, not clinical thresholds. The status turns into **LOW-VOLUME WARNING** only after **two consecutive completed affected breaths**, and is updated as playback progresses. A brief ceiling touch alone does not trigger it.
 - **Student callbacks:** total number of controller calls (`32/Ts`).
 
 A suitable teaching sequence is: examine the uncontrolled lung; tune P, then PI; try feedforward; test unexpected changes in C and R; inspect failure under pressure saturation; and compare your code against the exact discrete-time update.
@@ -150,12 +177,4 @@ No network access is needed after the static files have loaded. All calculations
 - [Respiratory Mechanics](https://pmc.ncbi.nlm.nih.gov/articles/PMC8360707/) — compliance, resistance, and the limitations of the single-compartment equation of motion.
 - [Single-compartment respiratory mechanics simulation](https://pmc.ncbi.nlm.nih.gov/articles/PMC7538006/) — an example of a lung model using resistance and compliance under pressure-controlled ventilation.
 
-## Developer checks
-
-The included Node.js test suite uses only built-in modules:
-
-```bash
-node tests/test_sim.cjs
-```
-
-It checks the exact exponential response, PEEP equilibrium, pressure clipping, parameter transitions, reference periodicity, sample counts, memory, invalid controller outputs, and feedforward tracking.
+**Clinical limitation:** The warning uses a simplified single-compartment plant with simulated flow and does not model leak compensation, patient physiology, clinical alarm standards, or true safety interlocks. It is not suitable for medical decision-making or device control.
