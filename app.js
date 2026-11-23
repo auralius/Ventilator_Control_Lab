@@ -1,10 +1,10 @@
-/* Barefoot Ventilator Control Lab v1.1 · entirely client-side · no dependencies. */
+/* Barefoot Ventilator Control Lab v1.2 · entirely client-side · no dependencies. */
 'use strict';
 const $ = id => document.getElementById(id);
 const cl = (x,a,b) => Math.max(a,Math.min(b,x));
 const fmt = (x,d=1) => Number(x).toFixed(d);
 const DURATION = 32;
-const PEEP = 5;
+const DEFAULT_PEEP = 5;
 const examples = {
   pi_ff: `// PI controller + model-based feedforward\n// Return ABSOLUTE airway pressure (cmH2O).\nfunction init() {\n  memory.integral = 0;\n}\n\nfunction controller() {\n  const e = state.target.volume - state.volume;\n  const Kp = 16;  // cmH2O per L\n  const Ki = 5;   // cmH2O per (L*s)\n\n  // Ideal pressure for the desired V and Vdot:\n  const feedforward = params.peep\n    + state.target.volume / params.compliance\n    + params.resistance * state.target.flow;\n\n  const raw = feedforward + Kp*e + Ki*memory.integral;\n  const pressure = Math.max(params.peep,\n                     Math.min(params.maxPressure, raw));\n\n  // Conditional integration (simple anti-windup).\n  if ((raw === pressure) ||\n      (raw > pressure && e < 0) ||\n      (raw < pressure && e > 0)) {\n    memory.integral += e * params.dt;\n  }\n  return {pressure, rawPressure: raw};\n}`,
   starter: `// Starter: edit controller() to track V_ref(t).\nfunction init() {\n  memory.integral = 0;\n}\n\nfunction controller() {\n  const error = state.target.volume - state.volume;\n  // TODO: calculate pressure from the error.\n  // Output is absolute pressure, not a PWM percentage.\n  return params.peep;\n}`,
@@ -13,20 +13,20 @@ const examples = {
   ff: `// Model-based feedforward (no feedback correction).\nfunction init() {}\n\nfunction controller() {\n  return params.peep\n    + state.target.volume / params.compliance\n    + params.resistance * state.target.flow;\n}`
 };
 const scenarioNotes = {
-  baseline:'Baseline: C = 0.050 L/cmH₂O, R = 10 cmH₂O·s/L, PEEP = 5 cmH₂O. Experiment length: 32 seconds.',
-  stiff:'At t = 12 s, lung compliance drops from 0.050 to 0.025 L/cmH₂O. The lung requires more pressure for the same volume.',
-  resistant:'At t = 12 s, airway resistance rises from 10 to 22 cmH₂O·s/L. Inspiration and passive expiration become slower.',
-  limited:'Pressure ceiling is restricted to 12 cmH₂O (PEEP = 5), regardless of the selector. A 500 mL target is unreachable at steady state.'
+  baseline: peep => `Baseline: C = 0.050 L/cmH₂O, R = 10 cmH₂O·s/L, selected PEEP = ${peep} cmH₂O. Experiment length: 32 seconds.`,
+  stiff: peep => `At t = 12 s, compliance drops from 0.050 to 0.025 L/cmH₂O; selected PEEP = ${peep} cmH₂O.`,
+  resistant: peep => `At t = 12 s, resistance rises from 10 to 22 cmH₂O·s/L; selected PEEP = ${peep} cmH₂O.`,
+  limited: peep => `Upper pressure ceiling is fixed at 12 cmH₂O; PEEP = ${peep} cmH₂O. Maximum equilibrium volume above PEEP: ${Math.round(50 * (12 - peep))} mL at baseline compliance.`
 };
 let results=null, activeIndex=0, playing=false, playbackTime=0, lastFrame=0, lastPlotFrame=0, worker=null, workerTimeout=null, dirty=true, serial=0;
 let currentCode='';
 function setStatus(text, mode='ok') { $('statusText').textContent=text; $('statusDot').className=mode; }
 function setMessage(text, kind='') { const m=$('message'); m.textContent=text; m.className='code-message '+kind; }
-function configFromUI() { return {dt:Number($('dtSelect').value), tidalVolume:Number($('tidalInput').value), bpm:Number($('bpmInput').value), inspirationFraction:Number($('inspInput').value), maxPressure:Number($('maxPressureSelect').value), scenario:$('scenarioSelect').value}; }
-function updateSettings() { $('tidalOutput').textContent=Math.round(Number($('tidalInput').value)*1000)+' mL'; $('bpmOutput').textContent=$('bpmInput').value+' /min'; $('inspOutput').textContent=Math.round(Number($('inspInput').value)*100)+'%'; $('scenarioNote').textContent=scenarioNotes[$('scenarioSelect').value]; dirty=true; if(results) setMessage('Experiment settings changed. Press Run or Apply & reset.', ''); }
+function configFromUI() { return {dt:Number($('dtSelect').value), tidalVolume:Number($('tidalInput').value), bpm:Number($('bpmInput').value), inspirationFraction:Number($('inspInput').value), peep:Number($('peepInput').value), maxPressure:Number($('maxPressureSelect').value), scenario:$('scenarioSelect').value}; }
+function updateSettings() { const peep=Number($('peepInput').value); $('tidalOutput').textContent=Math.round(Number($('tidalInput').value)*1000)+' mL'; $('bpmOutput').textContent=$('bpmInput').value+' /min'; $('peepOutput').textContent=peep+' cmH₂O'; $('inspOutput').textContent=Math.round(Number($('inspInput').value)*100)+'%'; $('scenarioNote').textContent=scenarioNotes[$('scenarioSelect').value](peep); $('limitOverride').textContent=$('scenarioSelect').value==='limited'?'Scenario overrides this setting: ceiling = 12 cmH₂O':'Active pressure ceiling for this experiment'; dirty=true; if(results) setMessage('Experiment settings changed. Press Run or Apply & reset to update the plots and diagnostics.', ''); else updateFrame(false); }
 function setCode(source) { $('codeEditor').value=source; updateLines(); dirty=true; }
 function updateLines() { const area=$('codeEditor'); const n=area.value.split('\n').length; $('lineNumbers').textContent=Array.from({length:n},(_,i)=>i+1).join('\n'); }
-function configInputs(disable) { for(const id of ['scenarioSelect','tidalInput','bpmInput','inspInput','dtSelect','maxPressureSelect','applyBtn']) $(id).disabled=disable; }
+function configInputs(disable) { for(const id of ['scenarioSelect','tidalInput','bpmInput','peepInput','inspInput','dtSelect','maxPressureSelect','applyBtn']) $(id).disabled=disable; }
 function stopWorker() { if(worker){worker.terminate();worker=null;} if(workerTimeout){clearTimeout(workerTimeout);workerTimeout=null;} }
 function simulate(autoplay=false) {
   playing=false;
@@ -37,7 +37,7 @@ function simulate(autoplay=false) {
   updateFrame();
   configInputs(true); setStatus('Compiling controller…','running'); setMessage('Running a 32-second simulation in an isolated Web Worker…','');
   const thisRun=++serial;
-  try { worker = new Worker('./sim-worker.js?v=1.1.0'); }
+  try { worker = new Worker('./sim-worker.js?v=1.2.0'); }
   catch(e) { configInputs(false); setStatus('Worker unavailable','error'); setMessage('The simulation worker could not start. Serve the folder with python3 -m http.server 8000. '+e.message,'error'); return; }
   const w = worker;
   workerTimeout=setTimeout(()=>{
@@ -78,7 +78,7 @@ function animate(now){
   if(playbackTime>=DURATION){playing=false;setStatus('Complete','ok');return;}
   requestAnimationFrame(animate);
 }
-function getSample(){return results?results.samples[activeIndex]:{t:0,volume:0,target:0,pressure:PEEP,rawPressure:PEEP,reportedPressure:PEEP,rawProvided:false,flow:0,compliance:.05,resistance:10,maxPressure:25,phase:'inspiration',saturated:false,ceilingActive:false};}
+function getSample(){return results?results.samples[activeIndex]:{t:0,volume:0,target:0,pressure:configFromUI().peep,peep:configFromUI().peep,rawPressure:configFromUI().peep,reportedPressure:configFromUI().peep,rawProvided:false,flow:0,compliance:.05,resistance:10,maxPressure:configFromUI().scenario==='limited'?12:configFromUI().maxPressure,phase:'inspiration',saturated:false,ceilingActive:false};}
 function updateBreathWarning(time){
   const banner=$('volumeWarning');
   const complete=results?.breaths?.filter(b=>b.end<=time+1e-7) || [];
@@ -97,6 +97,65 @@ function updateBreathWarning(time){
     banner.textContent=`Breath ${last.number} complete · inspired volume ${fmt(last.inspiredVolume*1000,0)} mL / ${fmt(results.config.tidalVolume*1000,0)} mL target; inspiration at ceiling ${fmt(last.ceilingFraction*100,1)}%. No consecutive low-volume/ceiling warning.`;
   }
 }
+function updateDiagnostics(s, config) {
+  // All quantities are based on the displayed simulation sample, not on future samples.
+  const targetMl=config.tidalVolume*1000;
+  const errorMl=(s.target-s.volume)*1000;
+  const driving=Math.max(0,s.pressure-s.peep);
+  const headroom=Math.max(0,s.maxPressure-s.pressure);
+  const maxDrive=Math.max(1e-8,s.maxPressure-s.peep);
+  const eqMl=s.compliance*maxDrive*1000;
+  const isFeasible=eqMl+1e-7>=targetMl;
+  $('stageError').textContent=(errorMl>0?'+':'')+fmt(errorMl,0);
+  $('stageError').classList.toggle('error-high',Math.abs(errorMl)>targetMl*.10);
+  $('budgetPeep').textContent=fmt(s.peep,1);
+  $('budgetApplied').textContent=fmt(s.pressure,1);
+  $('budgetLimit').textContent=fmt(s.maxPressure,1);
+  $('drivingPressure').textContent=fmt(driving,1)+' cmH₂O';
+  $('pressureHeadroom').textContent=fmt(headroom,1)+' cmH₂O';
+  $('budgetBase').style.width=fmt(cl(s.peep/s.maxPressure,0,1)*100,2)+'%';
+  $('budgetDrive').style.left=fmt(cl(s.peep/s.maxPressure,0,1)*100,2)+'%';
+  $('budgetDrive').style.width=fmt(cl(driving/s.maxPressure,0,1)*100,2)+'%';
+  $('budgetPeepTick').style.left=fmt(cl(s.peep/s.maxPressure,0,1)*100,2)+'%';
+  $('pressureStatus').textContent=s.ceilingActive?'AT CEILING':s.saturated?'CLIPPED':'WITHIN RANGE';
+  $('pressureStatus').classList.toggle('diagnostic-alert',s.ceilingActive||s.saturated);
+  $('equilibriumVolume').textContent=fmt(eqMl,0);
+  $('feasibilityLabel').textContent=isFeasible?'STATICALLY REACHABLE':'STATICALLY INFEASIBLE';
+  $('feasibilityLabel').classList.toggle('diagnostic-alert',!isFeasible);
+  // Comparison bar is scaled to max(target, ceiling-equilibrium) and capped at 100%.
+  const eqScale=Math.max(1,targetMl,eqMl);
+  $('eqFill').style.width=fmt(cl(eqMl/eqScale*100,0,100),2)+'%';
+  $('eqTargetTick').style.left=fmt(cl(targetMl/eqScale*100,0,100),2)+'%';
+  $('equilibriumExplain').textContent=isFeasible?
+    `At the maximum pressure, the theoretical equilibrium reaches ${fmt(eqMl,0)} mL, compared with a ${fmt(targetMl,0)} mL target. Dynamic tracking can still fall short during finite inspiration.`:
+    `The ${fmt(targetMl,0)} mL target exceeds the theoretical ${fmt(eqMl,0)} mL pressure-limited equilibrium. No controller can maintain this target in this model.`;
+  const period=60/config.bpm, ti=period*config.inspirationFraction;
+  // At the final time boundary we show the completed final breath explicitly.
+  const finished=s.t+1e-8>=DURATION;
+  const elapsed=finished?period:(s.t%period);
+  const phase=finished?'Cycle complete':elapsed<ti?'Inspiration':'Expiration';
+  const phaseFraction=finished?1:elapsed<ti?elapsed/ti:(elapsed-ti)/(period-ti);
+  $('cycleProgressLabel').textContent=finished?'Experiment complete · final breath ended':phase+' · '+fmt(cl(phaseFraction,0,1)*100,0)+'% of phase';
+  $('cycleTiming').textContent=fmt(elapsed,2)+' / '+fmt(period,2)+' s';
+  $('phaseProgressFill').style.width=fmt(cl(elapsed/period,0,1)*100,2)+'%';
+  $('phaseBoundary').style.left=fmt(config.inspirationFraction*100,2)+'%';
+  $('phaseProgressFill').classList.toggle('expiring',phase==='Expiration');
+  const completed=results?.breaths?.filter(b=>b.end<=s.t+1e-7)||[];
+  const b=completed.length?completed[completed.length-1]:null;
+  $('lastBreathLabel').textContent=b?`Breath ${b.number} complete`:'Awaiting first breath';
+  $('lastInspired').textContent=b?fmt(b.inspiredVolume*1000,0)+' mL':'—';
+  $('lastDelivery').textContent=b?fmt(b.inspiredVolume/config.tidalVolume*100,0)+'%':'—';
+  $('lastCeiling').textContent=b?fmt(b.ceilingFraction*100,0)+'%':'—';
+  const note=$('lastBreathNote');
+  if(!b){note.textContent='Waiting for a complete breath. Inspired volume is estimated by integrating positive flow during inspiration.';note.className='breath-diagnostic-note';}
+  else if(b.warningActive){note.textContent=`Educational low-volume warning: ${b.consecutiveLow} consecutive completed breaths had low inspired volume and substantial ceiling activity.`;note.className='breath-diagnostic-note alert';}
+  else if(b.failedBreath){note.textContent='Watch: inspired volume was low with sustained ceiling activity. Repetition will trigger the educational warning.';note.className='breath-diagnostic-note watch';}
+  else if(b.lowVolume){note.textContent='Inspired volume below 90% of target, without sufficient upper-ceiling activity for the combined warning.';note.className='breath-diagnostic-note watch';}
+  else{note.textContent='Latest completed breath met 90% of target; no combined low-volume/ceiling warning.';note.className='breath-diagnostic-note';}
+  $('volumeLive').textContent=`At ${fmt(s.t,2)} s · actual ${fmt(s.volume*1000,0)} mL · reference ${fmt(s.target*1000,0)} mL · error ${(errorMl>0?'+':'')+fmt(errorMl,0)} mL`;
+  $('pressureLive').textContent=`Applied ${fmt(s.pressure,1)} · requested ${fmt(s.rawPressure,1)} · PEEP ${fmt(s.peep,1)} · ceiling ${fmt(s.maxPressure,1)} cmH₂O${s.ceilingActive?' · AT CEILING':''}`;
+  $('flowLive').textContent=`${s.flow>=0?'Inflow':'Outflow'} ${fmt(Math.abs(s.flow),2)} L/s · sample-mean flow = ΔV / Tₛ`;
+}
 function updateFrame(draw=true){
   const s=getSample(), config=results?.config || configFromUI();
   const period=60/config.bpm;
@@ -105,8 +164,9 @@ function updateFrame(draw=true){
   $('stageVolume').textContent=fmt(s.volume*1000,0);$('stageTarget').textContent=fmt(s.target*1000,0);
   $('stageTime').textContent=fmt(s.t,2)+' s';
   $('breathCount').textContent=(s.t===0?1:Math.min(Math.floor((s.t+1e-7)/period)+1,Math.ceil(DURATION/period)))+' / '+Math.ceil(DURATION/period);
-  const phase=s.phase==='inspiration'; $('phaseText').textContent=phase?'Inspiration':'Expiration';
-  $('phasePill').textContent=results?(phase?'INSPIRATION':'EXPIRATION'):'READY';
+  const phase=s.phase==='inspiration', complete=Boolean(results)&&s.t>=DURATION-1e-8;
+  $('phaseText').textContent=complete?'Cycle complete':phase?'Inspiration':'Expiration';
+  $('phasePill').textContent=results?(complete?'COMPLETE':phase?'INSPIRATION':'EXPIRATION'):'READY';
   $('phasePill').style.color=phase?'#087f7b':'#8a5bc1';
   $('readCompliance').textContent=fmt(s.compliance,3);$('readResistance').textContent=fmt(s.resistance,1);$('readTau').textContent=fmt(s.compliance*s.resistance,2);$('readLimit').textContent=fmt(s.maxPressure,1);
   const frac=cl(s.volume/.75,0,1), tgt=cl(s.target/.75,0,1);
@@ -123,6 +183,7 @@ function updateFrame(draw=true){
   $('pressureNote').textContent=msg;$('pressureNote').classList.toggle('alert',s.ceilingActive||s.saturated);
   $('statRawPressure').textContent=fmt(s.rawPressure,1);
   $('statRawNote').textContent=s.rawProvided?'Unclipped demand reported by controller':'Returned demand (raw not separately supplied)';
+  updateDiagnostics(s,config);
   updateBreathWarning(s.t);
   $('timelineLabel').textContent=fmt(s.t,1)+' / '+fmt(DURATION,1)+' s';$('timelineFill').style.width=fmt(s.t/DURATION*100,2)+'%';
   if(draw)drawAllCharts();
@@ -162,13 +223,14 @@ function drawAllCharts(){
   drawPlot('volumeChart',[
     {color:'#e39a4e',val:r=>r.target*1000,width:2,dash:[5,4]},
     {color:'#3276d2',val:r=>r.volume*1000,width:2.5}],0,800,'mL');
-  const plotted=results?results.samples.slice(0,activeIndex+1).map(r=>r.rawPressure):[PEEP];
+  const peep=results?.config?.peep ?? Number($('peepInput').value);
+  const plotted=results?results.samples.slice(0,activeIndex+1).map(r=>r.rawPressure):[peep];
   const maxRaw=Math.max(maxPressure,...plotted.filter(Number.isFinite));
   const minRaw=Math.min(0,...plotted.filter(Number.isFinite));
   const pressureTop=Math.max(32,Math.min(100,5*Math.ceil((maxRaw+2)/5)));
   const pressureBottom=Math.max(-30,Math.min(0,5*Math.floor((minRaw-2)/5)));
   drawPlot('pressureChart',[
-    {color:'#a4b3bf',val:()=>PEEP,width:1.2,dash:[4,4]},
+    {color:'#a4b3bf',val:r=>r.peep,width:1.2,dash:[4,4]},
     {color:'#df6b72',val:()=>maxPressure,width:1.1,dash:[5,5]},
     {color:'#cf8425',val:r=>r.rawPressure,width:1.8,dash:[6,4]},
     {color:'#7865d6',val:r=>r.pressure,width:2.4}],pressureBottom,pressureTop,'cmH2O');
@@ -181,9 +243,19 @@ function reset(){playing=false;activeIndex=0;playbackTime=0;lastFrame=0;if(dirty
 function end(){if(dirty||!results){simulate(false);return;}playing=false;activeIndex=results.samples.length-1;playbackTime=DURATION;updateFrame(true);setStatus('Complete','ok');}
 function saveBlob(blob,name){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function csv(){if(!results){setMessage('Run the experiment before exporting a CSV.');return;}
-  const header=['time_s','volume_L','target_L','error_L','flow_L_per_s','target_flow_L_per_s','airway_pressure_applied_cmH2O','controller_return_cmH2O','controller_raw_demand_cmH2O','raw_demand_explicit','compliance_L_per_cmH2O','resistance_cmH2O_s_per_L','max_pressure_cmH2O','phase','ceiling_active','clipped','pressure_limit_active','low_volume_warning_active'];
-  const rows=results.samples.map(r=>[r.t,r.volume,r.target,r.error,r.flow,r.targetFlow,r.pressure,r.reportedPressure,r.rawPressure,r.rawProvided?1:0,r.compliance,r.resistance,r.maxPressure,r.phase,r.ceilingActive?1:0,r.clipped?1:0,r.saturated?1:0,(results.breaths.filter(b=>b.end<=r.t+1e-7).slice(-1)[0]?.warningActive?1:0)].join(','));
+  const header=['time_s','volume_L','target_L','error_L','flow_L_per_s','target_flow_L_per_s','airway_pressure_applied_cmH2O','peep_cmH2O','controller_return_cmH2O','controller_raw_demand_cmH2O','raw_demand_explicit','compliance_L_per_cmH2O','resistance_cmH2O_s_per_L','max_pressure_cmH2O','phase','ceiling_active','clipped','pressure_limit_active','low_volume_warning_active'];
+  const rows=results.samples.map(r=>[r.t,r.volume,r.target,r.error,r.flow,r.targetFlow,r.pressure,r.peep,r.reportedPressure,r.rawPressure,r.rawProvided?1:0,r.compliance,r.resistance,r.maxPressure,r.phase,r.ceilingActive?1:0,r.clipped?1:0,r.saturated?1:0,(results.breaths.filter(b=>b.end<=r.t+1e-7).slice(-1)[0]?.warningActive?1:0)].join(','));
   saveBlob(new Blob([[header.join(','),...rows].join('\n')+'\n'],{type:'text/csv;charset=utf-8'}),'ventilator_control_'+results.config.scenario+'.csv');
+}
+function csvBreaths(){
+  if(!results){setMessage('Run the experiment before exporting breath summaries.');return;}
+  const header=['breath_number','end_time_s','inspired_volume_mL','target_volume_mL','delivery_pct_of_target','peak_volume_mL','inspiration_at_ceiling_pct','low_volume_below_90pct','ceiling_fraction_above_10pct','combined_low_volume_and_ceiling','warning_active_after_2_consecutive'];
+  const rows=results.breaths.map(b=>[
+    b.number,b.end.toFixed(3),(b.inspiredVolume*1000).toFixed(2),(results.config.tidalVolume*1000).toFixed(2),
+    (100*b.inspiredVolume/results.config.tidalVolume).toFixed(2),(b.peakVolume*1000).toFixed(2),
+    (b.ceilingFraction*100).toFixed(2),Number(b.lowVolume),Number(b.ceilingConstrained),Number(b.failedBreath),Number(b.warningActive)
+  ].join(','));
+  saveBlob(new Blob([[header.join(','),...rows].join('\n')+'\n'],{type:'text/csv;charset=utf-8'}),'ventilator_breaths_'+results.config.scenario+'.csv');
 }
 function savePlots(){if(!results){setMessage('Run the experiment before saving plots.');return;}
   const plots=['volumeChart','pressureChart','flowChart'];const merged=document.createElement('canvas');const width=1200,height=720;merged.width=width;merged.height=height;
@@ -199,8 +271,8 @@ $('restoreBtn').onclick=()=>{setCode(examples[$('exampleSelect').value]);setMess
 $('runBtn').onclick=runButton;$('pauseBtn').onclick=pause;$('stepBtn').onclick=step;$('resetBtn').onclick=reset;$('finishBtn').onclick=end;
 $('applyBtn').onclick=()=>simulate(false);
 $('downloadCodeBtn').onclick=()=>saveBlob(new Blob([$('codeEditor').value+'\n'],{type:'text/javascript'}),'ventilator_student_controller.js');
-$('exportBtn').onclick=csv;$('exportPlotBtn').onclick=savePlots;
-for(const id of ['scenarioSelect','tidalInput','bpmInput','inspInput','dtSelect','maxPressureSelect'])$(id).addEventListener('change',updateSettings);
-for(const id of ['tidalInput','bpmInput','inspInput'])$(id).addEventListener('input',updateSettings);
+$('exportBtn').onclick=csv;$('exportBreathsBtn').onclick=csvBreaths;$('exportPlotBtn').onclick=savePlots;
+for(const id of ['scenarioSelect','tidalInput','bpmInput','peepInput','inspInput','dtSelect','maxPressureSelect'])$(id).addEventListener('change',updateSettings);
+for(const id of ['tidalInput','bpmInput','peepInput','inspInput'])$(id).addEventListener('input',updateSettings);
 let resizeTimer;window.addEventListener('resize',()=>{clearTimeout(resizeTimer);resizeTimer=setTimeout(drawAllCharts,80);});
 setCode(examples.pi_ff);updateSettings();setStatus('Ready','ok');updateFrame();simulate(false);

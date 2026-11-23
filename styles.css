@@ -37,3 +37,63 @@
   .result-footer>div:nth-child(even){border-right:0}
   .result-footer>div:nth-child(3),.result-footer>div:nth-child(4){border-bottom:1px solid var(--line)}
 }
+
+/* v1.2 classroom readouts: pressure budget, theoretical feasibility, completed-breath metrics */
+.volume-comparison{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.volume-comparison small{font-size:11px;color:#607d81}
+.volume-comparison b{color:#304d56}.volume-comparison b.error-high{color:#bc6a29}
+.stage-readout .readout-definition{display:block;font-size:9px;margin-top:8px;color:#799795}
+.diagnostic-heading{display:flex;gap:8px;justify-content:space-between;align-items:baseline}
+.diagnostic-heading>span{font-size:9px;font-weight:900;letter-spacing:.085em;color:#718698}
+.diagnostic-heading>strong{font-size:9px;color:#10867d;text-align:right}
+.diagnostic-heading>strong.diagnostic-alert{color:#c06932}
+.pressure-budget,.equilibrium-card{border:1px solid #e0e8ef;background:white;border-radius:10px;padding:13px 14px;min-width:0}
+.budget-track{height:12px;position:relative;border-radius:10px;background:#e7eef5;margin:15px 1px 6px;overflow:visible}
+.budget-base{position:absolute;left:0;top:0;height:100%;background:#b6c7d4;border-radius:10px 0 0 10px}
+.budget-drive{position:absolute;top:0;height:100%;background:linear-gradient(90deg,#b39de5,#7865d6);border-radius:0 10px 10px 0}
+.budget-peep-tick{position:absolute;top:-5px;width:3px;height:22px;background:#58758d;border-radius:3px}
+.budget-data{display:flex;justify-content:space-between;gap:6px;color:#718698;font-size:9px}
+.budget-data b{font-size:11px;color:#334c63}
+.budget-substats{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:11px 0 8px}
+.budget-substats>div{font-size:9px;color:#708599;line-height:1.4}
+.budget-substats strong{display:block;font-size:12px;color:#263c55;margin-top:3px}
+.pressure-budget>small{display:block;font-size:9px;color:#8493a5;line-height:1.45}
+.equilibrium-card{background:#f9fcfe}
+.equilibrium-main{display:flex;align-items:center;gap:12px;margin:9px 0 5px}
+.equilibrium-main>strong{color:#304f70;font-size:26px;white-space:nowrap;letter-spacing:-.04em}
+.equilibrium-main>strong small{font-size:12px;letter-spacing:0}
+.equilibrium-main>span{font-size:10px;color:#718396;line-height:1.4}
+.equilibrium-marker{height:10px;border-radius:9px;background:#e7edf3;position:relative;margin:11px 0}
+.equilibrium-marker>div:first-child{height:100%;width:0;border-radius:9px;background:linear-gradient(90deg,#82d4cc,#299d99)}
+#eqTargetTick{position:absolute;left:0;top:-4px;height:18px;width:3px;border-radius:2px;background:#e39a4e}
+.equilibrium-card p{color:#60768b;font-size:10px;line-height:1.5;margin:5px 0 6px}
+.equilibrium-formula{font-size:10px;color:#315d76;background:#eaf4f9;border-radius:5px;padding:6px 8px;display:inline-block}
+.breath-dashboard{border-top:1px solid var(--line);background:#f9fcfd;padding:13px 20px 14px}
+.breath-progress-top{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.breath-progress-top span,.breath-summary span{display:block;font-size:9px;color:#8093a6;font-weight:850;letter-spacing:.065em}
+.breath-progress-top strong{display:block;font-size:12px;margin-top:4px;color:#274b65}
+.breath-progress-top>small{font-size:10px;color:#8799aa;font-weight:700}
+.phase-track{position:relative;height:8px;background:linear-gradient(to right,#dcefed 0%,#dcefed 35%,#eae6f6 35%,#eae6f6 100%);border-radius:6px;margin:11px 0 14px;overflow:visible}
+.phase-track>div{height:100%;width:0;border-radius:6px;background:#0e9994;transition:width .08s linear}
+.phase-track>div.expiring{background:#7865d6}
+#phaseBoundary{position:absolute;top:-4px;height:16px;width:2px;background:#516b82}
+.breath-summary{display:grid;grid-template-columns:1.35fr 1fr .85fr 1.1fr;gap:9px}
+.breath-summary>div{padding:9px 10px;background:white;border:1px solid #e3edf2;border-radius:7px;min-width:0}
+.breath-summary strong{display:block;font-size:12px;margin-top:6px;color:#233f53;word-break:break-word}
+.breath-diagnostic-note{font-size:10px;color:#667f8c;line-height:1.5;margin-top:10px}
+.breath-diagnostic-note.watch{color:#9a6b25}.breath-diagnostic-note.alert{color:#bd4851;font-weight:700}
+.chart-live{margin:0 15px 3px;font-size:10px;color:#536d83;background:#f4f8fb;border-radius:5px;padding:7px 9px;line-height:1.35}
+@media(max-width:780px){.breath-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.stage-right{display:flex}.pressure-budget,.equilibrium-card{padding:11px}}
+@media(max-width:520px){.breath-summary{grid-template-columns:repeat(2,minmax(0,1fr))}.breath-dashboard{padding:12px}.chart-live{margin-left:10px;margin-right:10px}}
+
+/* Compact conceptual explanation fills the controller column's otherwise unused space. */
+.control-loop-guide{border-top:1px solid var(--line);background:#fbfdff;margin-top:auto;padding:17px 18px 20px}
+.control-flow{display:flex;align-items:stretch;gap:5px;margin:14px 0}
+.control-flow>div{background:white;border:1px solid #dce8ef;border-radius:7px;flex:1;min-width:0;padding:10px 7px;text-align:center}
+.control-flow>div>span{display:block;color:#0c8986;font-size:11px;font-weight:850}
+.control-flow>div>strong{font-size:9px;display:block;margin-top:6px;line-height:1.3;color:#466079}
+.control-flow>b{align-self:center;font-size:16px;color:#8da5b5}
+.control-loop-guide p{font-size:11px;color:#62788b;line-height:1.65;margin:9px 0}
+.step-equation{border-left:3px solid #0e9994;padding:10px 12px;color:#26526d;font-size:12px;background:#eff8f9;line-height:1.8;overflow-wrap:anywhere}
+.limit-override{font-size:10px;color:#8c6d31;line-height:1.3;font-weight:600;letter-spacing:0;text-transform:none}
+@media(max-width:520px){.control-loop-guide{padding:13px}.control-flow{flex-wrap:wrap}.control-flow>div{flex-basis:40%}.control-flow>b{display:none}}

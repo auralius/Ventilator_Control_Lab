@@ -1,7 +1,7 @@
-/* Barefoot Ventilator Lab v1.1 · student controller execution and exact-ZOH plant simulation.
+/* Barefoot Ventilator Lab v1.2 · student controller execution and exact-ZOH plant simulation.
    This worker isolates long-running student code from the page. It is NOT a security sandbox. */
 'use strict';
-const LIMITS = { C: 0.050, R: 10, peep: 5, duration: 32 };
+const LIMITS = { C: 0.050, R: 10, duration: 32 };
 // Educational threshold: two consecutive completed breaths with <90% of
 // desired inspiratory volume AND >=10% of inspiratory samples at the ceiling.
 const LOW_VOLUME_RATIO = 0.90;
@@ -26,7 +26,7 @@ function mechanicsAt(t, config) {
   return {
     compliance: config.scenario === 'stiff' && changing ? 0.025 : LIMITS.C,
     resistance: config.scenario === 'resistant' && changing ? 22 : LIMITS.R,
-    peep: LIMITS.peep,
+    peep: config.peep,
     maxPressure: config.scenario === 'limited' ? 12 : config.maxPressure
   };
 }
@@ -36,6 +36,7 @@ function validate(config) {
   if (!(config.tidalVolume >= 0.3 && config.tidalVolume <= 0.7)) throw new Error('Tidal volume must be between 0.30 and 0.70 L.');
   if (!(config.bpm >= 10 && config.bpm <= 20)) throw new Error('Breathing rate must be 10–20 breaths/min.');
   if (!(config.inspirationFraction >= .25 && config.inspirationFraction <= .5)) throw new Error('Inspiration fraction must be 25–50%.');
+  if (!Number.isFinite(config.peep) || config.peep < 0 || config.peep > 10) throw new Error('PEEP must be between 0 and 10 cmH₂O.');
   if (![20, 25, 30].includes(config.maxPressure)) throw new Error('Maximum pressure must be 20, 25, or 30 cmH₂O.');
   if (!['baseline','stiff','resistant','limited'].includes(config.scenario)) throw new Error('Unknown experiment scenario.');
 }
@@ -47,7 +48,7 @@ function runExperiment(code, config) {
     // Student functions share access to supplied state, params, and memory.
     compiled = new Function('state', 'params', 'memory', `"use strict";\n${code}\nreturn {\n  init: typeof init === "function" ? init : null,\n  controller: typeof controller === "function" ? controller : null\n};`);
   } catch (e) { throw new Error('JavaScript compile error: ' + e.message); }
-  let volume = 0, flow = 0, airwayPressure = LIMITS.peep;
+  let volume = 0, flow = 0, airwayPressure = config.peep;
   const memory = {};
   let params = null, state = null;
   let funcs;
@@ -82,10 +83,10 @@ function runExperiment(code, config) {
   const first = assignValues(0);
   fillHolders();
   try { if (funcs.init) funcs.init(); } catch (e) { throw new Error('init() failed: ' + e.message); }
-  const samples = [{t:0, volume:0, target:0, flow:0, targetFlow:0, pressure:LIMITS.peep,
+  const samples = [{t:0, volume:0, target:0, flow:0, targetFlow:0, pressure:config.peep, peep:config.peep,
     compliance:first.mech.compliance, resistance:first.mech.resistance, maxPressure:first.mech.maxPressure,
     phase:'inspiration', saturated:false, ceilingActive:false, lowerLimitActive:true,
-    reportedPressure:LIMITS.peep, rawPressure:LIMITS.peep, rawProvided:false,
+    reportedPressure:config.peep, rawPressure:config.peep, rawProvided:false,
     clipped:false, pressureLimitActive:false, commandPhase:'inspiration', error:0}];
   const n = Math.round(LIMITS.duration / config.dt);
   let sumSquare = 0, saturationCount = 0, ceilingCount = 0, clipCount = 0, rawReportedCount = 0;
@@ -134,7 +135,7 @@ function runExperiment(code, config) {
     const err = targetNow.volume - volume;
     sumSquare += err * err;
     samples.push({t:nt, volume, target:targetNow.volume, flow, targetFlow:targetNow.flow,
-      pressure:command, compliance:mech.compliance, resistance:mech.resistance,
+      pressure:command, peep:mech.peep, compliance:mech.compliance, resistance:mech.resistance,
       maxPressure:mech.maxPressure, phase:targetNow.phase, commandPhase:ref.phase,
       reportedPressure:output, rawPressure:raw, rawProvided,
       saturated, clipped, pressureLimitActive:saturated, ceilingActive, lowerLimitActive, error:err});

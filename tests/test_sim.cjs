@@ -8,7 +8,7 @@ function simulate(code,opts={}) {
   let response;
   const context={self:{postMessage:(m)=>{response=m;}},console,Math,Number,Error,Object,Array,Date,String,Set};
   vm.runInNewContext(js,context,{filename:'sim-worker.js',timeout:5000});
-  context.self.onmessage({data:{type:'simulate',code,config:{dt:.02, tidalVolume:.5,bpm:15,inspirationFraction:.35,maxPressure:25,scenario:'baseline',...opts}}});
+  context.self.onmessage({data:{type:'simulate',code,config:{dt:.02, tidalVolume:.5,bpm:15,inspirationFraction:.35,peep:5,maxPressure:25,scenario:'baseline',...opts}}});
   return response;
 }
 function test(name,fn){fn();tests++;console.log('✓',name);}
@@ -85,6 +85,47 @@ test('brief pressure-ceiling touch does not generate repeated low-volume warning
   const r=simulate('function controller(){return state.time%4<0.02 ? 12 : 5;}',{scenario:'limited'});
   assert.equal(r.type,'result');
   assert.equal(r.stats.warningTriggered,false);
+});
+
+test('selectable PEEP is passed to student code and changes the physical baseline',()=>{
+  for (const peep of [0,2,5,8,10]) {
+    const r=simulate('function controller(){return params.peep + 5;}',{peep});
+    assert.equal(r.type,'result');
+    assert.equal(r.config.peep,peep);
+    assert.equal(at(r,0).pressure,peep);
+    assert.equal(at(r,32).peep,peep);
+    assert.ok(Math.abs(at(r,32).volume-.25)<1e-9,`peep=${peep}`);
+    assert.equal(r.stats.ceilingPct,0);
+  }
+});
+test('higher PEEP reduces pressure headroom in ceiling challenge',()=>{
+  for (const [peep,expected] of [[0,.6],[5,.35],[8,.2],[10,.1]]) {
+    const r=simulate('function controller(){return 100;}',{peep,scenario:'limited'});
+    assert.equal(r.type,'result');
+    assert.ok(Math.abs(at(r,20).volume-expected)<1e-9,`peep=${peep}`);
+    assert.equal(r.stats.ceilingPct,100);
+    assert.equal(at(r,12).maxPressure,12);
+  }
+});
+test('selected PEEP is always the lower clamp and is not counted as upper ceiling',()=>{
+  const r=simulate('function controller(){return -100;}',{peep:9,scenario:'limited'});
+  assert.equal(r.type,'result');
+  assert.equal(at(r,32).pressure,9);
+  assert.equal(at(r,32).volume,0);
+  assert.equal(r.stats.ceilingPct,0);
+  assert.equal(r.stats.clipPct,100);
+});
+test('rejects invalid PEEP values',()=>{
+  for(const peep of [-1,11,NaN,Infinity]) {
+    const r=simulate('function controller(){return params.peep;}',{peep});
+    assert.equal(r.type,'error');
+    assert.match(r.message,/PEEP/);
+  }
+});
+test('low-volume warning still detects pressure-constrained breaths at higher PEEP',()=>{
+  const r=simulate('function controller(){return params.maxPressure;}',{peep:9,scenario:'limited'});
+  assert.equal(r.type,'result');
+  assert.equal(r.stats.warningTriggered,true);
 });
 
 console.log(`\n${tests} tests passed`);
