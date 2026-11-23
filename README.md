@@ -1,6 +1,8 @@
 # Mechanical Ventilator Control Lab v1.1
 
-**Barefoot Control Series · Educational biomedical process-control simulator · GitHub Pages-ready**
+__URL: https://auralius.github.io/Ventilator_Control_Lab/__
+
+---
 
 A lightweight browser-based virtual lab in which students write a JavaScript controller to regulate **lung volume** by commanding **airway pressure**. The reference follows a repeating inspiration/expiration cycle. The lab is built with native HTML, CSS, JavaScript, Canvas, SVG, and a Web Worker; no Python, Node.js, external CDNs, or JavaScript frameworks are required.
 
@@ -32,16 +34,16 @@ Upload the **contents** of this directory (`index.html`, `styles.css`, `app.js`,
 
 With lung volume **above the equilibrium baseline at PEEP** as output, and airway pressure as control input:
 
-\[
+$$
 P_{aw}(t)-PEEP = R\frac{dV(t)}{dt}+\frac{V(t)}{C}.
-\]
+$$
 
 Thus:
 
-\[
+$$
 \frac{dV}{dt}=\frac{P_{aw}-PEEP-V/C}{R}, \qquad
 G(s)=\frac{V(s)}{P_{aw}(s)-PEEP}=\frac{C}{RCs+1}.
-\]
+$$
 
 `R` is respiratory resistance in **cmH₂O·s/L**, `C` is respiratory-system compliance in **L/cmH₂O**, `P_aw` and `PEEP` are **cmH₂O**, and `V` is **L**. Airflow `dV/dt` is **L/s**. This idealized model presumes a passive, linear, lumped system with no leaks, no patient effort, and equal inspiratory/expiratory resistance.
 
@@ -64,12 +66,12 @@ G(s)=\frac{V(s)}{P_{aw}(s)-PEEP}=\frac{C}{RCs+1}.
 
 Let `T=60/bpm`, `Ti=T*inspirationFraction`, `Te=T−Ti`, and `a=t modulo T`. A smooth repeating desired volume is:
 
-\[
-V_{ref}(a)=\begin{cases}
-\frac{V_T}{2}\bigl(1-\cos(\pi a/T_i)\bigr), &0\le a<T_i,\\[3pt]
-\frac{V_T}{2}\bigl(1+\cos(\pi(a-T_i)/T_e)\bigr), &T_i\le a<T.
+```math
+V_{ref}(a) = \begin{cases}
+\dfrac{V_T}{2}\bigl(1 - \cos(\pi a / T_i)\bigr), & 0 \le a < T_i, \\
+\dfrac{V_T}{2}\bigl(1 + \cos(\pi(a - T_i) / T_e)\bigr), & T_i \le a < T.
 \end{cases}
-\]
+```
 
 The exact derivative is provided to students as `state.target.flow`. The resulting reference is a **pedagogical waveform**, not a specified clinical ventilation mode. The simulator does not guarantee it is reachable, especially during passive exhalation.
 
@@ -174,15 +176,5 @@ No network access is needed after the static files have loaded. All calculations
 
 - [Respiratory Mechanics](https://pmc.ncbi.nlm.nih.gov/articles/PMC8360707/) — compliance, resistance, and the limitations of the single-compartment equation of motion.
 - [Single-compartment respiratory mechanics simulation](https://pmc.ncbi.nlm.nih.gov/articles/PMC7538006/) — an example of a lung model using resistance and compliance under pressure-controlled ventilation.
-
-## Developer checks
-
-The included Node.js test suite uses only built-in modules:
-
-```bash
-node tests/test_sim.cjs
-```
-
-It checks exact exponential response, PEEP equilibrium, pressure clipping, parameter transitions, reference periodicity, sample counts, memory, invalid controller outputs, feedforward tracking, demand/applied separation, internally clipped legacy controllers, and breath-level warning logic.
 
 **Clinical limitation:** The warning uses a simplified single-compartment plant with simulated flow and does not model leak compensation, patient physiology, clinical alarm standards, or true safety interlocks. It is not suitable for medical decision-making or device control.
