@@ -1,4 +1,4 @@
-/* Barefoot Ventilator Control Lab v1.0 · entirely client-side · no dependencies. */
+/* Barefoot Ventilator Control Lab v1.1 · entirely client-side · no dependencies. */
 'use strict';
 const $ = id => document.getElementById(id);
 const cl = (x,a,b) => Math.max(a,Math.min(b,x));
@@ -6,10 +6,10 @@ const fmt = (x,d=1) => Number(x).toFixed(d);
 const DURATION = 32;
 const PEEP = 5;
 const examples = {
-  pi_ff: `// PI controller + model-based feedforward\n// Return ABSOLUTE airway pressure (cmH2O).\nfunction init() {\n  memory.integral = 0;\n}\n\nfunction controller() {\n  const e = state.target.volume - state.volume;\n  const Kp = 16;  // cmH2O per L\n  const Ki = 5;   // cmH2O per (L*s)\n\n  // Ideal pressure for the desired V and Vdot:\n  const feedforward = params.peep\n    + state.target.volume / params.compliance\n    + params.resistance * state.target.flow;\n\n  const raw = feedforward + Kp*e + Ki*memory.integral;\n  const pressure = Math.max(params.peep,\n                     Math.min(params.maxPressure, raw));\n\n  // Conditional integration (simple anti-windup).\n  if ((raw === pressure) ||\n      (raw > pressure && e < 0) ||\n      (raw < pressure && e > 0)) {\n    memory.integral += e * params.dt;\n  }\n  return pressure;\n}`,
+  pi_ff: `// PI controller + model-based feedforward\n// Return ABSOLUTE airway pressure (cmH2O).\nfunction init() {\n  memory.integral = 0;\n}\n\nfunction controller() {\n  const e = state.target.volume - state.volume;\n  const Kp = 16;  // cmH2O per L\n  const Ki = 5;   // cmH2O per (L*s)\n\n  // Ideal pressure for the desired V and Vdot:\n  const feedforward = params.peep\n    + state.target.volume / params.compliance\n    + params.resistance * state.target.flow;\n\n  const raw = feedforward + Kp*e + Ki*memory.integral;\n  const pressure = Math.max(params.peep,\n                     Math.min(params.maxPressure, raw));\n\n  // Conditional integration (simple anti-windup).\n  if ((raw === pressure) ||\n      (raw > pressure && e < 0) ||\n      (raw < pressure && e > 0)) {\n    memory.integral += e * params.dt;\n  }\n  return {pressure, rawPressure: raw};\n}`,
   starter: `// Starter: edit controller() to track V_ref(t).\nfunction init() {\n  memory.integral = 0;\n}\n\nfunction controller() {\n  const error = state.target.volume - state.volume;\n  // TODO: calculate pressure from the error.\n  // Output is absolute pressure, not a PWM percentage.\n  return params.peep;\n}`,
   p: `// Simple proportional controller with elastic offset.\nfunction init() {\n  // No memory is needed for a P controller.\n}\n\nfunction controller() {\n  const e = state.target.volume - state.volume;\n  const Kp = 35; // cmH2O per L\n  return params.peep + Kp * e;\n}`,
-  pi: `// PI control with simple conditional anti-windup.\nfunction init() {\n  memory.integral = 0;\n}\n\nfunction controller() {\n  const e = state.target.volume - state.volume;\n  const Kp = 35, Ki = 20;\n  const raw = params.peep + Kp*e + Ki*memory.integral;\n  const pressure = Math.max(params.peep,\n                     Math.min(params.maxPressure, raw));\n  if ((raw === pressure) ||\n      (raw > pressure && e < 0) ||\n      (raw < pressure && e > 0)) {\n    memory.integral += e * params.dt;\n  }\n  return pressure;\n}`,
+  pi: `// PI control with simple conditional anti-windup.\nfunction init() {\n  memory.integral = 0;\n}\n\nfunction controller() {\n  const e = state.target.volume - state.volume;\n  const Kp = 35, Ki = 20;\n  const raw = params.peep + Kp*e + Ki*memory.integral;\n  const pressure = Math.max(params.peep,\n                     Math.min(params.maxPressure, raw));\n  if ((raw === pressure) ||\n      (raw > pressure && e < 0) ||\n      (raw < pressure && e > 0)) {\n    memory.integral += e * params.dt;\n  }\n  return {pressure, rawPressure: raw};\n}`,
   ff: `// Model-based feedforward (no feedback correction).\nfunction init() {}\n\nfunction controller() {\n  return params.peep\n    + state.target.volume / params.compliance\n    + params.resistance * state.target.flow;\n}`
 };
 const scenarioNotes = {
@@ -37,7 +37,7 @@ function simulate(autoplay=false) {
   updateFrame();
   configInputs(true); setStatus('Compiling controller…','running'); setMessage('Running a 32-second simulation in an isolated Web Worker…','');
   const thisRun=++serial;
-  try { worker = new Worker('./sim-worker.js?v=1.0.0'); }
+  try { worker = new Worker('./sim-worker.js?v=1.1.0'); }
   catch(e) { configInputs(false); setStatus('Worker unavailable','error'); setMessage('The simulation worker could not start. Serve the folder with python3 -m http.server 8000. '+e.message,'error'); return; }
   const w = worker;
   workerTimeout=setTimeout(()=>{
@@ -57,7 +57,9 @@ function simulate(autoplay=false) {
     if(msg.type!=='result')return;
     results=msg;activeIndex=0;playbackTime=0;dirty=false;
     $('rmseRead').textContent=fmt(msg.stats.rmse*1000,1)+' mL';
-    $('satRead').textContent=fmt(msg.stats.saturationPct,1)+'%';
+    $('satRead').textContent=fmt(msg.stats.ceilingPct,1)+'%';
+    $('clipRead').textContent=fmt(msg.stats.clipPct,1)+'%';
+    $('lowBreathsRead').textContent=String(msg.stats.lowVolumeBreaths)+' / '+msg.breaths.length;
     $('callsRead').textContent=msg.stats.calls.toLocaleString();
     setStatus(autoplay?'Simulating':'Ready to run',autoplay?'running':'ok');
     setMessage(`Compiled successfully. ${msg.stats.calls} controller calls at Tₛ = ${fmt(msg.config.dt*1000,0)} ms. ${autoplay?'Playing now.':'Press Run to animate.'}`,'good');
@@ -76,7 +78,25 @@ function animate(now){
   if(playbackTime>=DURATION){playing=false;setStatus('Complete','ok');return;}
   requestAnimationFrame(animate);
 }
-function getSample(){return results?results.samples[activeIndex]:{t:0,volume:0,target:0,pressure:PEEP,flow:0,compliance:.05,resistance:10,maxPressure:25,phase:'inspiration',saturated:false};}
+function getSample(){return results?results.samples[activeIndex]:{t:0,volume:0,target:0,pressure:PEEP,rawPressure:PEEP,reportedPressure:PEEP,rawProvided:false,flow:0,compliance:.05,resistance:10,maxPressure:25,phase:'inspiration',saturated:false,ceilingActive:false};}
+function updateBreathWarning(time){
+  const banner=$('volumeWarning');
+  const complete=results?.breaths?.filter(b=>b.end<=time+1e-7) || [];
+  const last=complete.length?complete[complete.length-1]:null;
+  if(!last){
+    banner.className='breath-alert';
+    banner.textContent='Monitoring inspiratory volume and pressure-ceiling activity; waiting for a completed breath.';
+  } else if(last.warningActive){
+    banner.className='breath-alert active';
+    banner.textContent=`LOW-VOLUME WARNING · ${last.consecutiveLow} consecutive completed breaths below 90% of target while pressure was at the ceiling. Latest inspired: ${fmt(last.inspiredVolume*1000,0)} mL / ${fmt(results.config.tidalVolume*1000,0)} mL target. Educational diagnostic only.`;
+  } else if(last.failedBreath){
+    banner.className='breath-alert watch';
+    banner.textContent=`Volume shortfall + pressure ceiling on breath ${last.number}: ${fmt(last.inspiredVolume*1000,0)} mL inspired / ${fmt(results.config.tidalVolume*1000,0)} mL target. A second consecutive affected breath triggers the warning.`;
+  } else {
+    banner.className='breath-alert';
+    banner.textContent=`Breath ${last.number} complete · inspired volume ${fmt(last.inspiredVolume*1000,0)} mL / ${fmt(results.config.tidalVolume*1000,0)} mL target; inspiration at ceiling ${fmt(last.ceilingFraction*100,1)}%. No consecutive low-volume/ceiling warning.`;
+  }
+}
 function updateFrame(draw=true){
   const s=getSample(), config=results?.config || configFromUI();
   const period=60/config.bpm;
@@ -95,8 +115,15 @@ function updateFrame(draw=true){
   $('lungLeft').style.transform=`scale(${scale}, ${scale})`;
   $('lungRight').style.transform=`scale(${scale}, ${scale})`;
   $('diaphragm').style.transform=`translateY(${frac*12}px)`;
-  const msg=s.saturated?'Command reached a pressure limit.':s.phase==='expiration'?'Expiration can be passive at PEEP.':'The airway pressure is held between controller samples.';
-  $('pressureNote').textContent=msg;$('pressureNote').classList.toggle('alert',s.saturated);
+  const msg=s.ceilingActive
+    ? `At upper ceiling (${fmt(s.maxPressure,1)} cmH₂O). Reported controller demand: ${fmt(s.rawPressure,1)} cmH₂O.`
+    : s.saturated ? 'Controller request was limited to the permitted pressure range.'
+    : s.phase==='expiration' ? 'Expiration can be passive at PEEP.'
+    : 'The applied airway pressure is held between controller samples.';
+  $('pressureNote').textContent=msg;$('pressureNote').classList.toggle('alert',s.ceilingActive||s.saturated);
+  $('statRawPressure').textContent=fmt(s.rawPressure,1);
+  $('statRawNote').textContent=s.rawProvided?'Unclipped demand reported by controller':'Returned demand (raw not separately supplied)';
+  updateBreathWarning(s.t);
   $('timelineLabel').textContent=fmt(s.t,1)+' / '+fmt(DURATION,1)+' s';$('timelineFill').style.width=fmt(s.t/DURATION*100,2)+'%';
   if(draw)drawAllCharts();
 }
@@ -135,10 +162,16 @@ function drawAllCharts(){
   drawPlot('volumeChart',[
     {color:'#e39a4e',val:r=>r.target*1000,width:2,dash:[5,4]},
     {color:'#3276d2',val:r=>r.volume*1000,width:2.5}],0,800,'mL');
+  const plotted=results?results.samples.slice(0,activeIndex+1).map(r=>r.rawPressure):[PEEP];
+  const maxRaw=Math.max(maxPressure,...plotted.filter(Number.isFinite));
+  const minRaw=Math.min(0,...plotted.filter(Number.isFinite));
+  const pressureTop=Math.max(32,Math.min(100,5*Math.ceil((maxRaw+2)/5)));
+  const pressureBottom=Math.max(-30,Math.min(0,5*Math.floor((minRaw-2)/5)));
   drawPlot('pressureChart',[
     {color:'#a4b3bf',val:()=>PEEP,width:1.2,dash:[4,4]},
     {color:'#df6b72',val:()=>maxPressure,width:1.1,dash:[5,5]},
-    {color:'#7865d6',val:r=>r.pressure,width:2.4}],0,32,'cmH2O');
+    {color:'#cf8425',val:r=>r.rawPressure,width:1.8,dash:[6,4]},
+    {color:'#7865d6',val:r=>r.pressure,width:2.4}],pressureBottom,pressureTop,'cmH2O');
   drawPlot('flowChart',[{color:'#0e9994',val:r=>r.flow,width:2.4}],-1.2,1.2,'L/s',true);
 }
 function runButton(){ if(dirty||!results){simulate(true);return;} if(activeIndex>=results.samples.length-1){activeIndex=0;playbackTime=0;} if(!playing){playing=true;lastFrame=0;setStatus('Simulating','running');requestAnimationFrame(animate);} }
@@ -148,8 +181,8 @@ function reset(){playing=false;activeIndex=0;playbackTime=0;lastFrame=0;if(dirty
 function end(){if(dirty||!results){simulate(false);return;}playing=false;activeIndex=results.samples.length-1;playbackTime=DURATION;updateFrame(true);setStatus('Complete','ok');}
 function saveBlob(blob,name){const url=URL.createObjectURL(blob);const a=document.createElement('a');a.href=url;a.download=name;document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);}
 function csv(){if(!results){setMessage('Run the experiment before exporting a CSV.');return;}
-  const header=['time_s','volume_L','target_L','error_L','flow_L_per_s','target_flow_L_per_s','airway_pressure_cmH2O','compliance_L_per_cmH2O','resistance_cmH2O_s_per_L','max_pressure_cmH2O','phase','saturated'];
-  const rows=results.samples.map(r=>[r.t,r.volume,r.target,r.error,r.flow,r.targetFlow,r.pressure,r.compliance,r.resistance,r.maxPressure,r.phase,r.saturated?1:0].join(','));
+  const header=['time_s','volume_L','target_L','error_L','flow_L_per_s','target_flow_L_per_s','airway_pressure_applied_cmH2O','controller_return_cmH2O','controller_raw_demand_cmH2O','raw_demand_explicit','compliance_L_per_cmH2O','resistance_cmH2O_s_per_L','max_pressure_cmH2O','phase','ceiling_active','clipped','pressure_limit_active','low_volume_warning_active'];
+  const rows=results.samples.map(r=>[r.t,r.volume,r.target,r.error,r.flow,r.targetFlow,r.pressure,r.reportedPressure,r.rawPressure,r.rawProvided?1:0,r.compliance,r.resistance,r.maxPressure,r.phase,r.ceilingActive?1:0,r.clipped?1:0,r.saturated?1:0,(results.breaths.filter(b=>b.end<=r.t+1e-7).slice(-1)[0]?.warningActive?1:0)].join(','));
   saveBlob(new Blob([[header.join(','),...rows].join('\n')+'\n'],{type:'text/csv;charset=utf-8'}),'ventilator_control_'+results.config.scenario+'.csv');
 }
 function savePlots(){if(!results){setMessage('Run the experiment before saving plots.');return;}

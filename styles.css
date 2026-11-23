@@ -20,3 +20,20 @@
 }
 
 @media(min-width:1181px){.plant-panel{display:block}.plant-stage{flex:initial;align-items:initial}}
+
+/* v1.1: separated demand/applied pressure and breath-level diagnostics */
+.legend-amber{background:#cf8425}
+.breath-alert{margin:0 22px 10px;padding:12px 15px;border:1px solid #dce6e9;background:#f5f9fa;color:#486073;border-radius:8px;font-size:12px;line-height:1.55;font-weight:650}
+.breath-alert.watch{border-color:#f3dab0;background:#fffbef;color:#956322}
+.breath-alert.active{border-color:#e8a1a1;background:#fff2f1;color:#9d313b}
+.plot-explainer{padding:0 22px 14px;color:#6a7d8f;font-size:10px;line-height:1.55}
+.plot-explainer code{padding:1px 3px;border-radius:3px;background:#eef3f7;color:#176e79}
+@media(max-width:780px){.breath-alert{margin:0 12px 10px}.plot-explainer{padding:0 12px 12px}}
+/* Five distinct process/statistic readouts in v1.1. */
+.stats,.result-footer{grid-template-columns:repeat(5,minmax(0,1fr))}
+@media(max-width:780px){
+  .stats,.result-footer{grid-template-columns:repeat(2,minmax(0,1fr))}
+  .stats>.stat:last-child,.result-footer>div:last-child{grid-column:1/-1}
+  .result-footer>div:nth-child(even){border-right:0}
+  .result-footer>div:nth-child(3),.result-footer>div:nth-child(4){border-bottom:1px solid var(--line)}
+}

@@ -1,7 +1,12 @@
-/* Barefoot Ventilator Lab v1.0 · student controller execution and exact-ZOH plant simulation.
+/* Barefoot Ventilator Lab v1.1 · student controller execution and exact-ZOH plant simulation.
    This worker isolates long-running student code from the page. It is NOT a security sandbox. */
 'use strict';
 const LIMITS = { C: 0.050, R: 10, peep: 5, duration: 32 };
+// Educational threshold: two consecutive completed breaths with <90% of
+// desired inspiratory volume AND >=10% of inspiratory samples at the ceiling.
+const LOW_VOLUME_RATIO = 0.90;
+const CEILING_FRACTION = 0.10;
+const PRESSURE_EPS = 1e-8;
 const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
 function referenceAt(t, config) {
   const period = 60 / config.bpm;
@@ -79,9 +84,11 @@ function runExperiment(code, config) {
   try { if (funcs.init) funcs.init(); } catch (e) { throw new Error('init() failed: ' + e.message); }
   const samples = [{t:0, volume:0, target:0, flow:0, targetFlow:0, pressure:LIMITS.peep,
     compliance:first.mech.compliance, resistance:first.mech.resistance, maxPressure:first.mech.maxPressure,
-    phase:'inspiration', saturated:false, error:0}];
+    phase:'inspiration', saturated:false, ceilingActive:false, lowerLimitActive:true,
+    reportedPressure:LIMITS.peep, rawPressure:LIMITS.peep, rawProvided:false,
+    clipped:false, pressureLimitActive:false, commandPhase:'inspiration', error:0}];
   const n = Math.round(LIMITS.duration / config.dt);
-  let sumSquare = 0, saturationCount = 0;
+  let sumSquare = 0, saturationCount = 0, ceilingCount = 0, clipCount = 0, rawReportedCount = 0;
   for (let k = 0; k < n; k++) {
     const t = k * config.dt;
     const {mech, ref} = assignValues(t);
@@ -90,12 +97,28 @@ function runExperiment(code, config) {
     try { requested = funcs.controller(); } catch (e) {
       throw new Error(`controller() at t=${t.toFixed(2)} s: ${e.message}`);
     }
-    if (requested && typeof requested === 'object') requested = requested.pressure;
-    if (typeof requested !== 'number' || !Number.isFinite(requested))
-      throw new Error(`controller() must return a finite pressure number at t=${t.toFixed(2)} s.`);
-    const command = clamp(requested, mech.peep, mech.maxPressure);
-    const saturated = Math.abs(command - requested) > 1e-10;
+    // Legacy: return a number or {pressure: number}. For controllers that clip
+    // internally to implement anti-windup, use {pressure, rawPressure} so both
+    // the unclipped demand and the returned command can be inspected.
+    const isObject = requested !== null && typeof requested === 'object';
+    const output = isObject ? requested.pressure : requested;
+    const rawProvided = isObject && Object.prototype.hasOwnProperty.call(requested, 'rawPressure');
+    const raw = rawProvided ? requested.rawPressure : output;
+    if (typeof output !== 'number' || !Number.isFinite(output) ||
+        typeof raw !== 'number' || !Number.isFinite(raw))
+      throw new Error(`controller() must return finite pressure values at t=${t.toFixed(2)} s.`);
+    if (rawProvided) rawReportedCount++;
+    const command = clamp(output, mech.peep, mech.maxPressure);
+    const clipped = Math.abs(command - output) > PRESSURE_EPS ||
+                    Math.abs(raw - command) > PRESSURE_EPS;
+    const ceilingActive = command >= mech.maxPressure - PRESSURE_EPS;
+    const lowerLimitActive = command <= mech.peep + PRESSURE_EPS;
+    // Upper-ceiling occupancy is observable even when student code pre-clips.
+    // Do not treat normal expiration at PEEP as an upper-pressure ceiling event.
+    const saturated = clipped || ceilingActive;
     if (saturated) saturationCount++;
+    if (ceilingActive) ceilingCount++;
+    if (clipped) clipCount++;
     // C and R are held constant across a sample. Exact ZOH update for
     // dV/dt = (Paw-PEEP - V/C) / R, including passive expiration at Paw=PEEP.
     const equilibrium = mech.compliance * (command - mech.peep);
@@ -112,9 +135,42 @@ function runExperiment(code, config) {
     sumSquare += err * err;
     samples.push({t:nt, volume, target:targetNow.volume, flow, targetFlow:targetNow.flow,
       pressure:command, compliance:mech.compliance, resistance:mech.resistance,
-      maxPressure:mech.maxPressure, phase:targetNow.phase, saturated, error:err});
+      maxPressure:mech.maxPressure, phase:targetNow.phase, commandPhase:ref.phase,
+      reportedPressure:output, rawPressure:raw, rawProvided,
+      saturated, clipped, pressureLimitActive:saturated, ceilingActive, lowerLimitActive, error:err});
   }
-  return { samples, config, stats: {rmse: Math.sqrt(sumSquare / n), saturationPct: 100 * saturationCount / n, calls: n, duration: LIMITS.duration} };
+  // Group each completed breathing cycle by controller-sample midpoint. This
+  // avoids shifting a cycle's final sample into the next cycle at its boundary.
+  // "Inspired volume" is the positive-flow integral during inspiration,
+  // a teaching proxy, NOT a clinical tidal-volume measurement or alarm.
+  const period = 60 / config.bpm;
+  const completeBreaths = Math.floor((LIMITS.duration + 1e-8) / period);
+  const breaths = [];
+  let consecutiveLow = 0;
+  for (let j = 0; j < completeBreaths; j++) {
+    const rows = samples.slice(1).filter(row =>
+      Math.floor((row.t - config.dt / 2 + 1e-9) / period) === j);
+    const insp = rows.filter(row => row.commandPhase === 'inspiration');
+    const inspiredVolume = insp.reduce((sum, row) => sum + Math.max(0, row.flow) * config.dt, 0);
+    const ceilingSamples = insp.filter(row => row.ceilingActive).length;
+    const ceilingFraction = insp.length ? ceilingSamples / insp.length : 0;
+    const peakVolume = rows.reduce((mx,row) => Math.max(mx,row.volume), 0);
+    const lowVolume = inspiredVolume < LOW_VOLUME_RATIO * config.tidalVolume;
+    const ceilingConstrained = ceilingFraction >= CEILING_FRACTION;
+    const failedBreath = lowVolume && ceilingConstrained;
+    consecutiveLow = failedBreath ? consecutiveLow + 1 : 0;
+    breaths.push({number:j+1, end:(j+1)*period, inspiredVolume,
+      peakVolume, ceilingFraction, lowVolume, ceilingConstrained,
+      failedBreath, consecutiveLow, warningActive:consecutiveLow >= 2});
+  }
+  return { samples, breaths, config, stats: {
+    rmse: Math.sqrt(sumSquare / n), saturationPct: 100*saturationCount/n,
+    ceilingPct: 100*ceilingCount/n, clipPct: 100*clipCount/n,
+    rawReportedPct: 100*rawReportedCount/n,
+    lowVolumeBreaths: breaths.filter(b=>b.failedBreath).length,
+    warningTriggered: breaths.some(b=>b.warningActive),
+    calls:n, duration:LIMITS.duration
+  } };
 }
 self.onmessage = event => {
   try {

@@ -31,4 +31,60 @@ test('missing controller reports helpful error',()=>{const r=simulate('function 
 test('syntax errors report compile errors',()=>{const r=simulate('function controller() { return ; x(@) }');assert.equal(r.type,'error');assert.match(r.message,/compile error/);});
 test('non-finite controller outputs rejected',()=>{const r=simulate('function controller(){return Infinity;}');assert.equal(r.type,'error');assert.match(r.message,/finite pressure/);});
 test('model-based feedforward tracks analytic reference',()=>{const r=simulate('function controller(){return params.peep+state.target.volume/params.compliance+params.resistance*state.target.flow;}');assert.equal(r.type,'result');assert.ok(r.stats.rmse<.016,'RMSE '+r.stats.rmse);});
+
+test('raw demand and applied pressure are preserved separately',()=>{
+  const r=simulate('function controller(){return {pressure:12,rawPressure:38};}',{scenario:'limited'});
+  assert.equal(r.type,'result');
+  assert.equal(at(r,2).rawPressure,38);
+  assert.equal(at(r,2).reportedPressure,12);
+  assert.equal(at(r,2).pressure,12);
+  assert.equal(at(r,2).rawProvided,true);
+  assert.equal(r.stats.ceilingPct,100);
+  assert.equal(r.stats.clipPct,100);
+});
+test('internally clipped scalar return still registers upper ceiling',()=>{
+  const r=simulate('function controller(){return Math.min(12,200);}',{scenario:'limited'});
+  assert.equal(r.type,'result');
+  assert.equal(r.stats.ceilingPct,100);
+  assert.equal(r.stats.clipPct,0); // hidden raw demand is unknowable
+  assert.equal(at(r,8).ceilingActive,true);
+  assert.equal(at(r,8).rawProvided,false);
+});
+test('warning triggers only after two completed ceiling-constrained low-volume breaths',()=>{
+  const controller='function controller(){return {pressure:12,rawPressure:40};}';
+  const r=simulate(controller,{scenario:'limited'});
+  assert.equal(r.type,'result');
+  assert.equal(r.breaths.length,8);
+  assert.equal(r.breaths[0].failedBreath,true);
+  assert.equal(r.breaths[0].warningActive,false);
+  assert.equal(r.breaths[1].failedBreath,true);
+  assert.equal(r.breaths[1].warningActive,true);
+  assert.equal(r.stats.warningTriggered,true);
+  assert.ok(r.breaths[1].inspiredVolume < .45);
+});
+test('low delivered volume without reaching ceiling does not raise ceiling-related warning',()=>{
+  const r=simulate('function controller(){return params.peep;}');
+  assert.equal(r.type,'result');
+  assert.equal(r.stats.ceilingPct,0);
+  assert.equal(r.stats.warningTriggered,false);
+  assert.equal(r.stats.lowVolumeBreaths,0);
+});
+test('low pressure saturation does not count as upper ceiling',()=>{
+  const r=simulate('function controller(){return -100;}');
+  assert.equal(r.type,'result');
+  assert.equal(r.stats.ceilingPct,0);
+  assert.equal(r.stats.clipPct,100);
+  assert.equal(r.stats.saturationPct,100);
+});
+test('malformed optional raw demand is rejected',()=>{
+  const r=simulate('function controller(){return {pressure:12,rawPressure:Infinity};}');
+  assert.equal(r.type,'error');
+  assert.match(r.message,/finite pressure/);
+});
+test('brief pressure-ceiling touch does not generate repeated low-volume warning',()=>{
+  const r=simulate('function controller(){return state.time%4<0.02 ? 12 : 5;}',{scenario:'limited'});
+  assert.equal(r.type,'result');
+  assert.equal(r.stats.warningTriggered,false);
+});
+
 console.log(`\n${tests} tests passed`);
